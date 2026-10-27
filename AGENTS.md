@@ -307,6 +307,15 @@ on every flag underneath it.
 1. **SDK layer** (`sdk/api/<name>/`): Create typed API wrapper with CRUD functions using `httpclient.Client`. No file I/O, no display logic.
 2. **CLI layer** (`pkg/resources/<name>/`): Create resource handler that delegates to SDK. Handle file reading, display fields, name resolution here. Read user-supplied paths through `pkg/vfs`, never `os` directly (see [Embedding Invariants](#-critical-embedding-invariants-)).
 3. **Commands**: Add to `cmd/get.go`, `cmd/describe.go`, etc. Mutating verbs need a safety check; `-f`/`--file` flags go through `vfs` and are declared with `markFileFlag` (rule 1); no `os.Exit`, no ungated subprocess. Build each command in a `newXCmd()` constructor (flags bound to variables local to it, stability tier declared inside), attach it in `init()` as usual **and** list it in `newCommandTree` in `cmd/root_factory.go`; read the run's state through `cmdContext(cmd)` (see [Embedding Invariants](#-critical-embedding-invariants-) rule 7).
+3b. **Scopes**: `engine.Parse` reports a command's scope bounds from its
+   `auth.ResourceScopes` entry (`pkg/auth/resource_scopes.go`): the entry
+   at the verb's access level is the minimum, plus the read scopes the
+   maximum. A command that never reaches the platform is `markLocal`; one
+   that runs a caller's DQL is `markScopesDQL`, one that runs other DQL
+   itself or through the server `markRunsDQL`, one whose payload or target
+   decides what is called (caller code, an analyzer) `markScopesAny`. A
+   command with neither entry nor declaration fails the build.
+   *Guard*: `go test ./cmd/ -run 'TestScopeBoundsOverTheTree|TestLocalCommandsArePinned|TestDQL|TestServerSideBoundsArePinned'`
 4. Register in resolver
 5. Add tests: `sdk/api/<name>/*_test.go` (SDK unit tests) + `test/e2e/<name>_test.go` (E2E)
 5b. **Declare the stability tier** — every command, stable ones included; the
@@ -530,6 +539,12 @@ guards run every command with each string flag set to a path on a recording
 filesystem, so a file flag without the declaration fails them, naming the line
 to add.
 *Guard*: `go test ./cmd/ -run 'TestFileFlagsAreDeclared|TestFileFlagAnnotationsAreValid|TestInputWithoutArgsIsDeclared|TestVFSEnvCallSitesAreKnown'`
+
+A command that asks for confirmation on stdin is declared too, with the flags
+that skip the question: `markConfirms(c, "yes", "dry-run")`. Name `dry-run`
+only where the dry run returns before the question. Parse reports such a
+command as reading stdin unless `--plain`, `--agent` or a skip flag is set.
+*Guard*: `go test ./cmd/ -run TestConfirmationPromptsAreDeclared`
 
 The test is **whose file is it**: a path the *user named* (`-f`, `--file`,
 `--data-file`, a query file, a file to `diff`, an `apply --write-id` writeback)

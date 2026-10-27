@@ -118,6 +118,7 @@ scripts and agents consume.`,
 	}
 	c.Flags().BoolVar(&allContexts, "all-contexts", false, "show every context with recorded usage, not just the current one")
 	stability.Mark(c, stability.Experimental, "0.43.0")
+	markLocal(c)
 	return c
 }
 
@@ -153,6 +154,7 @@ configured; to stop recording, run:
 	}
 	c.Flags().BoolVar(&allContexts, "all-contexts", false, "clear every context's tally (deletes the usage file)")
 	c.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation prompt")
+	markConfirms(c, "yes")
 	stability.Mark(c, stability.Experimental, "0.43.0")
 	return c
 }
