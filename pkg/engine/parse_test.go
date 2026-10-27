@@ -58,9 +58,13 @@ func TestParse(t *testing.T) {
 			command: "apply -f .",
 			want:    Parsed{Verb: "apply", Scopes: ScopesInputDependent},
 		},
-		"a file named - is not reported": {
+		"a file named -": {
 			command: "apply -f ./-",
-			want:    Parsed{Verb: "apply", Scopes: ScopesInputDependent},
+			want:    Parsed{Verb: "apply", InputFiles: []string{"-"}, Scopes: ScopesInputDependent},
+		},
+		"an at-path to a file named -": {
+			command: "exec api /platform/x -X POST -d @./-",
+			want:    Parsed{Verb: "exec", Resource: "api", InputFiles: []string{"-"}, Scopes: ScopesPerCall},
 		},
 		"empty at-path": {
 			command: "exec api /platform/x -X POST -d @",
@@ -76,9 +80,62 @@ func TestParse(t *testing.T) {
 			require.NoError(t, err)
 			if tc.want.Scopes == ScopesKnown && tc.want.RequiredScopes == nil {
 				assert.NotEmpty(t, got.RequiredScopes)
-				got.RequiredScopes = nil
+				got.RequiredScopes = []string{}
+			}
+			if tc.want.RequiredScopes == nil {
+				tc.want.RequiredScopes = []string{}
+			}
+			if tc.want.InputFiles == nil {
+				tc.want.InputFiles = []string{}
+			}
+			if tc.want.OutputFiles == nil {
+				tc.want.OutputFiles = []string{}
 			}
 			assert.Equal(t, &tc.want, got)
+		})
+	}
+}
+
+// TestParse_CheckScopesReadsNoInput: --check-scopes prints a verdict and does
+// not run the command, so the command reads no input.
+func TestParse_CheckScopesReadsNoInput(t *testing.T) {
+	for _, command := range []string{
+		"delete workflow wf-1 --check-scopes",
+		"query --check-scopes",
+		"apply -f - --check-scopes",
+	} {
+		t.Run(command, func(t *testing.T) {
+			got, err := Parse(context.Background(), ParseRequest{Command: command})
+			require.NoError(t, err)
+			assert.False(t, got.RequiresInput)
+		})
+	}
+}
+
+// TestParse_Confirmation: a command that asks for confirmation reads the
+// request's input, unless the command line skips the question.
+func TestParse_Confirmation(t *testing.T) {
+	for command, want := range map[string]bool{
+		"delete workflow wf-1":               true,
+		"delete workflow wf-1 --yes":         false,
+		"delete workflow wf-1 -y":            false,
+		"delete workflow wf-1 --yes=false":   true,
+		"delete workflow wf-1 --plain":       false,
+		"delete workflow wf-1 --agent":       false,
+		"delete workflow wf-1 --dry-run":     false,
+		"--dry-run delete workflow wf-1":     false,
+		"delete bucket b --confirm b":        false,
+		"restore dashboard d 3":              true,
+		"restore dashboard d 3 --force":      false,
+		"restore trash a":                    true,
+		"restore trash a b":                  false, // asks for one document only
+		"delete scheduling-rule r --dry-run": true,  // asks before its dry run returns
+		"get workflows":                      false,
+	} {
+		t.Run(command, func(t *testing.T) {
+			got, err := Parse(context.Background(), ParseRequest{Command: command, MinStability: "experimental"})
+			require.NoError(t, err)
+			assert.Equal(t, want, got.RequiresInput)
 		})
 	}
 }
